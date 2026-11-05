@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import date, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
-from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
+from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders, restocking_orders
 
 app = FastAPI(title="Factory Inventory Management System")
 
@@ -67,6 +68,8 @@ class InventoryItem(BaseModel):
     unit_cost: float
     location: str
     last_updated: str
+    lead_time_days: Optional[int] = None
+    supplier: Optional[str] = None
 
 class Order(BaseModel):
     id: str
@@ -119,6 +122,33 @@ class CreatePurchaseOrderRequest(BaseModel):
     unit_cost: float
     expected_delivery_date: str
     notes: Optional[str] = None
+
+class RestockingOrderLine(BaseModel):
+    sku: str
+    quantity: int
+
+class RestockingOrderItem(BaseModel):
+    sku: str
+    name: str
+    quantity: int
+    unit_cost: float
+    line_cost: float
+    lead_time_days: int
+
+class CreateRestockingOrderRequest(BaseModel):
+    items: List[RestockingOrderLine]
+
+class RestockingOrder(BaseModel):
+    id: str
+    items: List[RestockingOrderItem]
+    total_cost: float
+    lead_time_days: int
+    created_date: str
+    expected_delivery: str
+    status: str
+
+# Used when an inventory item has no lead time of its own
+DEFAULT_LEAD_TIME_DAYS = 14
 
 # API endpoints
 @app.get("/")
@@ -178,6 +208,47 @@ def get_backlog():
         item_dict["has_purchase_order"] = has_po
         result.append(item_dict)
     return result
+
+@app.get("/api/restocking-orders", response_model=List[RestockingOrder])
+def get_restocking_orders():
+    """Get submitted restocking orders, newest first"""
+    return list(reversed(restocking_orders))
+
+@app.post("/api/restocking-orders", response_model=RestockingOrder, status_code=201)
+def create_restocking_order(request: CreateRestockingOrderRequest):
+    """Submit a restocking order. Costs and lead times come from inventory, not the client."""
+    if not request.items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
+
+    lines = []
+    for line in request.items:
+        if line.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid quantity for {line.sku}")
+        item = next((i for i in inventory_items if i["sku"] == line.sku), None)
+        if not item:
+            raise HTTPException(status_code=400, detail=f"Unknown SKU {line.sku}")
+        lines.append({
+            "sku": item["sku"],
+            "name": item["name"],
+            "quantity": line.quantity,
+            "unit_cost": item["unit_cost"],
+            "line_cost": round(line.quantity * item["unit_cost"], 2),
+            "lead_time_days": item.get("lead_time_days") or DEFAULT_LEAD_TIME_DAYS
+        })
+
+    today = date.today()
+    lead_time_days = max(line["lead_time_days"] for line in lines)
+    order = {
+        "id": f"RST-{len(restocking_orders) + 1:04d}",
+        "items": lines,
+        "total_cost": round(sum(line["line_cost"] for line in lines), 2),
+        "lead_time_days": lead_time_days,
+        "created_date": today.isoformat(),
+        "expected_delivery": (today + timedelta(days=lead_time_days)).isoformat(),
+        "status": "Submitted"
+    }
+    restocking_orders.append(order)
+    return order
 
 @app.get("/api/dashboard/summary")
 def get_dashboard_summary(
