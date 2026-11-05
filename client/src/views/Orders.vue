@@ -74,6 +74,39 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">{{ t('orders.submittedOrders.title') }} ({{ submittedOrders.length }})</h3>
+        </div>
+        <div v-if="submittedOrders.length === 0" class="empty-submitted">{{ t('orders.submittedOrders.empty') }}</div>
+        <div v-else class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>{{ t('orders.table.orderId') }}</th>
+                <th>{{ t('orders.table.items') }}</th>
+                <th>{{ t('orders.table.value') }}</th>
+                <th>{{ t('orders.submittedOrders.submitted') }}</th>
+                <th>{{ t('orders.submittedOrders.leadTime') }}</th>
+                <th>{{ t('orders.table.expectedDelivery') }}</th>
+                <th>{{ t('orders.table.status') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="sub in submittedOrders" :key="sub.id">
+                <td><strong>{{ sub.id }}</strong></td>
+                <td>{{ t('orders.itemsCount', { count: sub.items.length }) }}</td>
+                <td><strong>{{ currencySymbol }}{{ sub.total_cost.toLocaleString() }}</strong></td>
+                <td>{{ formatDate(sub.created_date) }}</td>
+                <td>{{ t('orders.submittedOrders.days', { count: sub.lead_time_days }) }}</td>
+                <td>{{ formatDate(sub.expected_delivery) }}</td>
+                <td><span class="badge info">{{ sub.status }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -95,6 +128,7 @@ export default {
     const loading = ref(true)
     const error = ref(null)
     const orders = ref([])
+    const submittedOrders = ref([])
 
     // Use shared filters
     const {
@@ -153,13 +187,25 @@ export default {
       })
     }
 
-    onMounted(loadOrders)
+    const loadSubmittedOrders = async () => {
+      try {
+        submittedOrders.value = await api.getRestockingOrders()
+      } catch (err) {
+        console.error('Failed to load submitted orders:', err)
+      }
+    }
+
+    onMounted(() => {
+      loadOrders()
+      loadSubmittedOrders()
+    })
 
     return {
       t,
       loading,
       error,
       orders,
+      submittedOrders,
       getOrdersByStatus,
       getOrderStatusClass,
       formatDate,
@@ -274,6 +320,12 @@ export default {
 
 .item-meta {
   font-size: 0.813rem;
+  color: #64748b;
+}
+
+.empty-submitted {
+  padding: 2rem;
+  text-align: center;
   color: #64748b;
 }
 </style>
